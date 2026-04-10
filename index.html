@@ -396,7 +396,8 @@
       <div class="sidebar-section">
         <h3>Processing</h3>
         <div class="seg-control" id="processing-seg">
-          <button class="seg-btn active" data-mode="greyscale">Grey</button>
+          <button class="seg-btn active" data-mode="segment">Body</button>
+          <button class="seg-btn" data-mode="greyscale">Grey</button>
           <button class="seg-btn" data-mode="edge">Edge</button>
           <button class="seg-btn" data-mode="posterised">Post.</button>
         </div>
@@ -513,7 +514,7 @@ function reflectionTick(now) {
   if (controller.currentMode === 'REFLECTION') {
     if (now - lastCameraTime >= cameraInterval) {
       lastCameraTime = now;
-      const frame = imgProcessor.processFrame(panel.processingMode, panel.brightness, panel.contrast);
+      const frame = imgProcessor.processFrame(panel.processingMode, panel.brightness, panel.contrast, now);
       if (frame) controller.setFrame(frame);
     }
   }
@@ -522,10 +523,11 @@ function reflectionTick(now) {
 
 // ── Start ────────────────────────────────────────────────────────────────────
 async function boot() {
-  await controller.init();     // build grid DOM
-  await content.init();        // load playlist
-  content.start();             // begin idle sequences
-  await faceDetector.load();   // load MediaPipe model
+  await controller.init();          // build grid DOM
+  await content.init();             // load playlist
+  content.start();                  // begin idle sequences
+  await faceDetector.load();        // load MediaPipe face detection
+  imgProcessor.loadSegmenter();     // load selfie segmenter (non-blocking)
 
   // Start camera preview (silent — face detection listens on it)
   try {

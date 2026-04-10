@@ -11,7 +11,7 @@ export class ControlPanel {
     this._content= content;
     this._bridge = bridge;
 
-    this.processingMode = 'greyscale';
+    this.processingMode = 'segment';
     this.brightness     = CONFIG.DEFAULT_BRIGHTNESS;
     this.contrast       = CONFIG.DEFAULT_CONTRAST;
   }

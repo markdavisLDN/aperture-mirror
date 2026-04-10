@@ -7,14 +7,12 @@ const TOTAL = COLS * ROWS;
 /**
  * Captures webcam frames, downsamples to 24×13, and applies processing.
  *
- * Processing strategy:
- *   Background subtraction (default): captures an empty background frame at
- *   startup, then maps the DIFFERENCE to aperture values. This makes the
- *   person always appear bright regardless of whether they are lighter or
- *   darker than their background, and works in any ambient lighting.
+ * Default mode: 'segment' — MediaPipe Selfie Segmenter identifies the person
+ * and maps only them to open apertures, ignoring background entirely.
+ * This solves the lighting-inversion problem: person always = bright,
+ * background always = dark, regardless of ambient lighting.
  *
- *   Greyscale / edge / posterised modes operate on the raw luminance instead,
- *   useful when background subtraction is not appropriate.
+ * Fallback modes (greyscale / edge / posterised) operate on raw luminance.
  */
 export class ImageProcessor {
   constructor(canvas) {
@@ -25,19 +23,55 @@ export class ImageProcessor {
     this._canvas.width  = COLS;
     this._canvas.height = ROWS;
 
-    this._background    = null;   // Float32Array(TOTAL) — captured background
-    this._bgSamples     = [];     // accumulate frames for a stable background
-    this._bgReady       = false;
-    this._bgCapturing   = false;
+    // Segmenter
+    this._segmenter  = null;
+    this._maskCanvas = null;
+    this._maskCtx    = null;
+    this._segReady   = false;
+
+    // Background subtraction (fallback when segmenter unavailable)
+    this._background  = null;
+    this._bgSamples   = [];
+    this._bgReady     = false;
+    this._bgCapturing = false;
   }
 
   setSource(videoEl) {
     this._source = videoEl;
-    // Start accumulating background frames after a brief delay
     setTimeout(() => this._startBackgroundCapture(), 1500);
   }
 
-  // ── Background capture ─────────────────────────────────────────────────────
+  // ── Segmenter ──────────────────────────────────────────────────────────────
+
+  async loadSegmenter() {
+    try {
+      const { ImageSegmenter, FilesetResolver } = await import(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/vision_bundle.mjs'
+      );
+      const vision = await FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm'
+      );
+      this._segmenter = await ImageSegmenter.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+          delegate: 'GPU',
+        },
+        runningMode:         'VIDEO',
+        outputCategoryMask:  false,
+        outputConfidenceMasks: true,
+      });
+
+      // Offscreen canvas for full-res mask → downsample to 24×13
+      this._maskCanvas = document.createElement('canvas');
+      this._maskCtx    = this._maskCanvas.getContext('2d', { willReadFrequently: true });
+      this._segReady   = true;
+      console.log('[ImageProcessor] Selfie segmenter loaded');
+    } catch (e) {
+      console.warn('[ImageProcessor] Segmenter unavailable, using background subtraction:', e.message);
+    }
+  }
+
+  // ── Background capture (fallback) ─────────────────────────────────────────
 
   _startBackgroundCapture() {
     this._bgCapturing = true;
@@ -45,7 +79,6 @@ export class ImageProcessor {
     console.log('[ImageProcessor] Capturing background…');
   }
 
-  /** Call this to re-capture background (e.g. when re-entering IDLE) */
   resetBackground() {
     this._bgReady     = false;
     this._bgSamples   = [];
@@ -54,8 +87,8 @@ export class ImageProcessor {
   }
 
   _accumulateBackground(grey) {
-    this._bgSamples.push(grey);
-    if (this._bgSamples.length >= 8) {  // average 8 frames for stable bg
+    this._bgSamples.push(grey.slice());
+    if (this._bgSamples.length >= 8) {
       this._background = new Float32Array(TOTAL);
       for (let i = 0; i < TOTAL; i++) {
         let sum = 0;
@@ -68,44 +101,50 @@ export class ImageProcessor {
     }
   }
 
-  // ── Main processing ────────────────────────────────────────────────────────
+  // ── Main entry point ───────────────────────────────────────────────────────
 
-  processFrame(mode, brightness, contrast) {
+  /**
+   * @param {string} mode  'segment' | 'greyscale' | 'edge' | 'posterised'
+   * @param {number} brightness  0–100
+   * @param {number} contrast    0–100
+   * @param {number} timestamp   performance.now() — required for segmenter
+   */
+  processFrame(mode, brightness, contrast, timestamp = performance.now()) {
     if (!this._source || this._source.readyState < 2) return null;
 
-    const ctx = this._ctx;
+    let processed = null;
 
-    // Downsample + horizontal flip into 24×13 canvas
-    ctx.save();
-    ctx.translate(COLS, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(this._source, 0, 0, COLS, ROWS);
-    ctx.restore();
-
-    const imgData = ctx.getImageData(0, 0, COLS, ROWS).data;
-    const grey    = this._toGreyscale(imgData);
-
-    // Still accumulating background — return empty frame
-    if (this._bgCapturing) {
-      this._accumulateBackground(grey);
-      return new Array(TOTAL).fill(0);
+    if (mode === 'segment' && this._segReady) {
+      processed = this._segmentFrame(timestamp);
     }
 
-    let processed;
+    // Fallback to luminance-based pipeline
+    if (!processed) {
+      // Draw + flip into 24×13 canvas
+      const ctx = this._ctx;
+      ctx.save();
+      ctx.translate(COLS, 0);
+      ctx.scale(-1, 1);
+      ctx.drawImage(this._source, 0, 0, COLS, ROWS);
+      ctx.restore();
 
-    if (mode === 'greyscale' || mode === 'edge' || mode === 'posterised') {
-      // Raw luminance modes — use auto-contrast so the full range is used
-      const stretched = this._autoContrast(grey);
-      if (mode === 'edge') {
-        processed = this._edgeEnhanced(stretched);
-      } else if (mode === 'posterised') {
-        processed = this._posterised(stretched);
-      } else {
-        processed = stretched;
+      const imgData = ctx.getImageData(0, 0, COLS, ROWS).data;
+      const grey    = this._toGreyscale(imgData);
+
+      if (this._bgCapturing) {
+        this._accumulateBackground(grey);
+        return new Array(TOTAL).fill(0);
       }
-    } else {
-      // Default / 'bg' mode: background subtraction
-      processed = this._backgroundSubtract(grey);
+
+      if (mode === 'edge') {
+        processed = this._edgeEnhanced(this._autoContrast(grey));
+      } else if (mode === 'posterised') {
+        processed = this._posterised(this._autoContrast(grey));
+      } else if (this._bgReady) {
+        processed = this._backgroundSubtract(grey);
+      } else {
+        processed = this._autoContrast(grey);
+      }
     }
 
     // Brightness / contrast sliders
@@ -124,7 +163,61 @@ export class ImageProcessor {
     return out;
   }
 
-  // ── Processing modes ───────────────────────────────────────────────────────
+  // ── Segmentation (primary) ────────────────────────────────────────────────
+
+  _segmentFrame(timestamp) {
+    if (!this._segmenter || !this._source) return null;
+    try {
+      const result = this._segmenter.segmentForVideo(this._source, timestamp);
+      const mask   = result.confidenceMasks?.[0];
+      if (!mask) return null;
+
+      const vw = this._source.videoWidth  || 640;
+      const vh = this._source.videoHeight || 480;
+
+      if (this._maskCanvas.width !== vw || this._maskCanvas.height !== vh) {
+        this._maskCanvas.width  = vw;
+        this._maskCanvas.height = vh;
+      }
+
+      // Write confidence mask to full-res canvas (horizontally flipped = mirror)
+      const maskData = mask.getAsFloat32Array();
+      const imgData  = this._maskCtx.createImageData(vw, vh);
+      for (let row = 0; row < vh; row++) {
+        for (let col = 0; col < vw; col++) {
+          const srcIdx = row * vw + (vw - 1 - col); // flip
+          const dstIdx = row * vw + col;
+          const v = maskData[srcIdx] * 255;
+          imgData.data[dstIdx*4]   = v;
+          imgData.data[dstIdx*4+1] = v;
+          imgData.data[dstIdx*4+2] = v;
+          imgData.data[dstIdx*4+3] = 255;
+        }
+      }
+      this._maskCtx.putImageData(imgData, 0, 0);
+
+      // Downsample mask to 24×13 via GPU-accelerated drawImage
+      this._ctx.drawImage(this._maskCanvas, 0, 0, COLS, ROWS);
+      const small = this._ctx.getImageData(0, 0, COLS, ROWS);
+
+      // Sigmoid to push person (≥0.5 confidence) to fully open,
+      // background (≤0.5) to fully closed — clean silhouette
+      const out = new Array(TOTAL);
+      for (let i = 0; i < TOTAL; i++) {
+        const norm = small.data[i * 4] / 255;            // 0–1
+        const s    = 1 / (1 + Math.exp(-14 * (norm - 0.5))); // sharp sigmoid
+        out[i]     = s * 255;
+      }
+
+      mask.close(); // free GPU texture
+      return out;
+
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // ── Luminance pipeline ────────────────────────────────────────────────────
 
   _toGreyscale(imgData) {
     const out = new Array(TOTAL);
@@ -134,52 +227,31 @@ export class ImageProcessor {
     return out;
   }
 
-  /**
-   * Background subtraction: map how much each pixel differs from the empty
-   * background. Person = high difference = open aperture.
-   * Amplified and stretched so subtle presence reads clearly at 24×13.
-   */
-  _backgroundSubtract(grey) {
-    const out  = new Array(TOTAL);
-    const bg   = this._background;
-
-    if (!bg) return this._autoContrast(grey);
-
-    let max = 0;
-    for (let i = 0; i < TOTAL; i++) {
-      out[i] = Math.abs(grey[i] - bg[i]);
-      if (out[i] > max) max = out[i];
-    }
-
-    // Stretch so the largest difference = 255
-    if (max < 8) return new Array(TOTAL).fill(0); // nothing moving
-    const scale = 255 / max;
-
-    // Apply sigmoid to push mid-differences to either open or closed cleanly
-    for (let i = 0; i < TOTAL; i++) {
-      const norm = (out[i] * scale) / 255;           // 0–1
-      const s    = 1 / (1 + Math.exp(-10 * (norm - 0.35))); // sigmoid gate
-      out[i]     = s * 255;
-    }
-
-    return out;
-  }
-
   _autoContrast(grey) {
     let min = 255, max = 0;
-    for (const v of grey) {
-      if (v < min) min = v;
-      if (v > max) max = v;
-    }
+    for (const v of grey) { if (v < min) min = v; if (v > max) max = v; }
     const range = max - min;
     if (range < 10) return grey.slice();
     const scale = 255 / range;
-    // Apply sigmoid after stretch to push contrast further
     return grey.map(v => {
       const norm = (v - min) * scale / 255;
-      const s    = 1 / (1 + Math.exp(-8 * (norm - 0.5)));
-      return s * 255;
+      return (1 / (1 + Math.exp(-8 * (norm - 0.5)))) * 255;
     });
+  }
+
+  _backgroundSubtract(grey) {
+    const bg = this._background;
+    if (!bg) return this._autoContrast(grey);
+    const out = new Array(TOTAL);
+    let max = 0;
+    for (let i = 0; i < TOTAL; i++) { out[i] = Math.abs(grey[i] - bg[i]); if (out[i] > max) max = out[i]; }
+    if (max < 8) return new Array(TOTAL).fill(0);
+    const scale = 255 / max;
+    for (let i = 0; i < TOTAL; i++) {
+      const norm = (out[i] * scale) / 255;
+      out[i] = (1 / (1 + Math.exp(-10 * (norm - 0.35)))) * 255;
+    }
+    return out;
   }
 
   _edgeEnhanced(grey) {
@@ -187,18 +259,17 @@ export class ImageProcessor {
     for (let row = 0; row < ROWS; row++) {
       for (let col = 0; col < COLS; col++) {
         const idx = row * COLS + col;
-        const tl = grey[Math.max(row-1,0)    * COLS + Math.max(col-1,0)];
-        const tm = grey[Math.max(row-1,0)    * COLS + col];
-        const tr = grey[Math.max(row-1,0)    * COLS + Math.min(col+1,COLS-1)];
-        const ml = grey[row                  * COLS + Math.max(col-1,0)];
-        const mr = grey[row                  * COLS + Math.min(col+1,COLS-1)];
-        const bl = grey[Math.min(row+1,ROWS-1) * COLS + Math.max(col-1,0)];
-        const bm = grey[Math.min(row+1,ROWS-1) * COLS + col];
-        const br = grey[Math.min(row+1,ROWS-1) * COLS + Math.min(col+1,COLS-1)];
-        const gx   = -tl + tr - 2*ml + 2*mr - bl + br;
-        const gy   = -tl - 2*tm - tr + bl + 2*bm + br;
-        const edge = Math.min(255, Math.sqrt(gx*gx + gy*gy));
-        out[idx]   = Math.min(255, grey[idx] + edge * 1.4);
+        const tl = grey[Math.max(row-1,0)     * COLS + Math.max(col-1,0)];
+        const tm = grey[Math.max(row-1,0)     * COLS + col];
+        const tr = grey[Math.max(row-1,0)     * COLS + Math.min(col+1,COLS-1)];
+        const ml = grey[row                   * COLS + Math.max(col-1,0)];
+        const mr = grey[row                   * COLS + Math.min(col+1,COLS-1)];
+        const bl = grey[Math.min(row+1,ROWS-1)* COLS + Math.max(col-1,0)];
+        const bm = grey[Math.min(row+1,ROWS-1)* COLS + col];
+        const br = grey[Math.min(row+1,ROWS-1)* COLS + Math.min(col+1,COLS-1)];
+        const gx = -tl + tr - 2*ml + 2*mr - bl + br;
+        const gy = -tl - 2*tm - tr + bl + 2*bm + br;
+        out[idx] = Math.min(255, grey[idx] + Math.sqrt(gx*gx + gy*gy) * 1.4);
       }
     }
     return out;
