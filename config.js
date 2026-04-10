@@ -25,6 +25,6 @@ export const CONFIG = {
   WS_URL: 'ws://localhost:8765',
 
   // Brightness / contrast defaults (0–100)
-  DEFAULT_BRIGHTNESS: 80,
-  DEFAULT_CONTRAST: 60,
+  DEFAULT_BRIGHTNESS: 100,
+  DEFAULT_CONTRAST: 70,
 };

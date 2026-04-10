@@ -53,7 +53,7 @@ export class ImageProcessor {
       );
       this._segmenter = await ImageSegmenter.createFromOptions(vision, {
         baseOptions: {
-          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+          modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter_landscape/float16/latest/selfie_segmenter_landscape.tflite',
           delegate: 'GPU',
         },
         runningMode:         'VIDEO',
@@ -200,12 +200,12 @@ export class ImageProcessor {
       this._ctx.drawImage(this._maskCanvas, 0, 0, COLS, ROWS);
       const small = this._ctx.getImageData(0, 0, COLS, ROWS);
 
-      // Sigmoid to push person (≥0.5 confidence) to fully open,
-      // background (≤0.5) to fully closed — clean silhouette
+      // Hard threshold: person (confidence ≥ 0.35) → fully open,
+      // background → fully closed. Binary output matches physical reference.
       const out = new Array(TOTAL);
       for (let i = 0; i < TOTAL; i++) {
         const norm = small.data[i * 4] / 255;            // 0–1
-        const s    = 1 / (1 + Math.exp(-14 * (norm - 0.5))); // sharp sigmoid
+        const s    = 1 / (1 + Math.exp(-22 * (norm - 0.35))); // steep sigmoid at lower threshold
         out[i]     = s * 255;
       }
 
