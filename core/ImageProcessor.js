@@ -42,19 +42,23 @@ export class ImageProcessor {
     const imgData = ctx.getImageData(0, 0, COLS, ROWS).data;
     const grey    = this._toGreyscale(imgData);
 
+    // Auto-contrast: stretch actual min→max to fill 0–255 each frame.
+    // This ensures the person always pops against the background
+    // regardless of ambient lighting level.
+    const autoGrey = this._autoContrast(grey);
+
     let processed;
     if (mode === 'edge') {
-      processed = this._edgeEnhanced(grey);
+      processed = this._edgeEnhanced(autoGrey);
     } else if (mode === 'posterised') {
-      processed = this._posterised(grey);
+      processed = this._posterised(autoGrey);
     } else {
-      processed = grey.slice();
+      processed = autoGrey.slice();
     }
 
-    // Brightness / contrast adjustment
-    const b = brightness / 100;   // 0–1 multiplier
-    const c = (contrast / 100) * 2 - 1;  // -1 to +1
-
+    // Brightness / contrast adjustment (user sliders on top of auto-contrast)
+    const b = brightness / 100;
+    const c = (contrast / 100) * 2 - 1;
     const factor = (259 * (c * 255 + 255)) / (255 * (259 - c * 255));
 
     for (let i = 0; i < processed.length; i++) {
@@ -75,9 +79,22 @@ export class ImageProcessor {
       const r = imgData[i * 4];
       const g = imgData[i * 4 + 1];
       const bl= imgData[i * 4 + 2];
-      out[i] = 0.299 * r + 0.587 * g + 0.114 * bl;
+      // Bright areas → open apertures (high value = open)
+      out[i] = 255 - (0.299 * r + 0.587 * g + 0.114 * bl);
     }
     return out;
+  }
+
+  _autoContrast(grey) {
+    let min = 255, max = 0;
+    for (let i = 0; i < grey.length; i++) {
+      if (grey[i] < min) min = grey[i];
+      if (grey[i] > max) max = grey[i];
+    }
+    const range = max - min;
+    if (range < 10) return grey.slice(); // flat frame — don't stretch noise
+    const scale = 255 / range;
+    return grey.map(v => (v - min) * scale);
   }
 
   _edgeEnhanced(grey) {

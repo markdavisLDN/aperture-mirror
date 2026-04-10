@@ -15,7 +15,7 @@ export const CONFIG = {
   // Camera / processing
   TARGET_FPS_CAMERA: 24,
   TARGET_FPS_RENDER: 60,
-  FACE_LOST_TIMEOUT_MS: 3000,
+  FACE_LOST_TIMEOUT_MS: 8000,
 
   // Wave transition
   WAVE_COLUMN_DELAY_MS: 40, // stagger between columns
