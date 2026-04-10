@@ -1,0 +1,86 @@
+{
+  "defaultDuration": 5000,
+  "loop": true,
+  "sequences": [
+    {
+      "id": "pulse-open",
+      "type": "pattern",
+      "patternId": "pulse",
+      "duration": 6000,
+      "speed": 1.0,
+      "transition": "fade"
+    },
+    {
+      "id": "hello",
+      "type": "text",
+      "content": "HELLO",
+      "duration": 5000,
+      "scroll": true,
+      "brightness": 255,
+      "transition": "wave"
+    },
+    {
+      "id": "ripple-1",
+      "type": "pattern",
+      "patternId": "ripple",
+      "duration": 7000,
+      "speed": 1.2,
+      "transition": "fade"
+    },
+    {
+      "id": "look",
+      "type": "text",
+      "content": "LOOK",
+      "duration": 4000,
+      "scroll": false,
+      "brightness": 200,
+      "transition": "cut"
+    },
+    {
+      "id": "noise-ambient",
+      "type": "pattern",
+      "patternId": "noise",
+      "duration": 8000,
+      "speed": 0.5,
+      "transition": "fade"
+    },
+    {
+      "id": "scan-h",
+      "type": "pattern",
+      "patternId": "scan_h",
+      "duration": 5000,
+      "speed": 1.0,
+      "transition": "cut"
+    },
+    {
+      "id": "open-all",
+      "type": "solid",
+      "value": 220,
+      "duration": 3000,
+      "transition": "fade"
+    },
+    {
+      "id": "cascade-1",
+      "type": "pattern",
+      "patternId": "cascade",
+      "duration": 6000,
+      "speed": 1.0,
+      "transition": "fade"
+    },
+    {
+      "id": "close-all",
+      "type": "solid",
+      "value": 0,
+      "duration": 2000,
+      "transition": "fade"
+    },
+    {
+      "id": "columns-rhythm",
+      "type": "pattern",
+      "patternId": "columns",
+      "duration": 5000,
+      "speed": 1.5,
+      "transition": "cut"
+    }
+  ]
+}

@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Aperture Mirror</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0a0a;
+    --surface: #141414;
+    --surface2: #1e1e1e;
+    --border: #2a2a2a;
+    --text: #d0d0d0;
+    --text-dim: #666;
+    --accent: #e8a040;
+    --teal: #3abfaa;
+    --amber: #e8a040;
+    --sidebar-w: 280px;
+  }
+
+  html, body {
+    width: 100%; height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 12px;
+    overflow: hidden;
+  }
+
+  #app {
+    display: flex;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  /* ── Main canvas area ── */
+  #main {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    background: #080808;
+  }
+
+  #grid-container {
+    position: relative;
+    /* sized by JS based on viewport */
+  }
+
+  #iris-grid {
+    display: grid;
+    grid-template-columns: repeat(24, 1fr);
+    grid-template-rows: repeat(13, 1fr);
+    gap: 3px;
+    background: #0a0a0a;
+  }
+
+  .iris-cell {
+    position: relative;
+    aspect-ratio: 1;
+  }
+
+  .iris-cell svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  /* ── Sidebar ── */
+  #sidebar {
+    width: var(--sidebar-w);
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transition: transform 0.25s ease;
+    flex-shrink: 0;
+  }
+
+  #sidebar.collapsed {
+    transform: translateX(var(--sidebar-w));
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+  }
+
+  #sidebar-toggle {
+    position: absolute;
+    right: calc(var(--sidebar-w) + 8px);
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 10;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 8px 5px;
+    border-radius: 4px 0 0 4px;
+    font-size: 10px;
+    line-height: 1;
+    transition: right 0.25s ease;
+  }
+
+  #sidebar-toggle:hover { color: var(--text); border-color: var(--text-dim); }
+
+  #sidebar.collapsed ~ #sidebar-toggle,
+  body.sidebar-collapsed #sidebar-toggle {
+    right: 8px;
+  }
+
+  .sidebar-section {
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sidebar-section h3 {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+
+  /* Mode indicator */
+  #mode-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+  }
+
+  #mode-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #555;
+    transition: background 0.3s;
+  }
+
+  #mode-badge.idle   #mode-dot { background: #555; }
+  #mode-badge.transitioning #mode-dot { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  #mode-badge.reflection #mode-dot { background: var(--teal); box-shadow: 0 0 6px var(--teal); }
+
+  /* Controls */
+  .control-row {
+    margin-bottom: 10px;
+  }
+
+  .control-row label {
+    display: flex;
+    justify-content: space-between;
+    color: var(--text-dim);
+    margin-bottom: 5px;
+    font-size: 11px;
+  }
+
+  .control-row label span { color: var(--text); }
+
+  input[type=range] {
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 3px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+  }
+
+  /* Segmented control */
+  .seg-control {
+    display: flex;
+    gap: 2px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px;
+  }
+
+  .seg-btn {
+    flex: 1;
+    padding: 5px 4px;
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    font-size: 10px;
+    font-family: inherit;
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+    text-align: center;
+  }
+
+  .seg-btn.active {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+  }
+
+  /* Toggle switch */
+  .toggle-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+
+  .toggle-row span { font-size: 11px; color: var(--text-dim); }
+
+  .toggle {
+    position: relative;
+    width: 32px; height: 18px;
+  }
+
+  .toggle input { display: none; }
+
+  .toggle-track {
+    position: absolute;
+    inset: 0;
+    background: var(--border);
+    border-radius: 9px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 3px; left: 3px;
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    background: #555;
+    transition: transform 0.2s, background 0.2s;
+  }
+
+  .toggle input:checked + .toggle-track { background: #2a4a3a; }
+  .toggle input:checked + .toggle-track::after { transform: translateX(14px); background: var(--teal); }
+
+  /* Buttons */
+  .btn {
+    padding: 6px 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 11px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+
+  .btn:hover { border-color: var(--text-dim); color: var(--text); }
+  .btn.primary { border-color: var(--accent); color: var(--accent); }
+  .btn.primary:hover { background: rgba(232,160,64,0.1); }
+
+  .btn-row {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  /* WS status */
+  #ws-status {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 5px;
+  }
+
+  /* Debug panel */
+  #debug-panel {
+    position: absolute;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(10,10,10,0.85);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px;
+    display: none;
+    gap: 12px;
+    z-index: 5;
+  }
+
+  #debug-panel.visible { display: flex; }
+
+  #debug-camera {
+    width: 96px;
+    height: 52px;
+    background: #111;
+    border: 1px solid var(--border);
+  }
+
+  #debug-grid-canvas {
+    width: 96px;
+    height: 52px;
+    image-rendering: pixelated;
+    border: 1px solid var(--border);
+  }
+
+  #debug-labels {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-around;
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+
+  /* Content editor overlay */
+  #editor-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(8,8,8,0.92);
+    z-index: 20;
+    display: none;
+    flex-direction: column;
+  }
+
+  #editor-overlay.open { display: flex; }
+
+  /* Scrollable sidebar content */
+  #sidebar-scroll {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+</style>
+</head>
+<body>
+
+<!-- Shared SVG defs (gradients, reusable symbols) -->
+<svg width="0" height="0" style="position:absolute;overflow:hidden" aria-hidden="true">
+  <defs>
+    <radialGradient id="backlight-grad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#fff8ee"/>
+      <stop offset="30%"  stop-color="#ffc060"/>
+      <stop offset="70%"  stop-color="#e07820"/>
+      <stop offset="100%" stop-color="#803010"/>
+    </radialGradient>
+    <radialGradient id="blade-sheen" cx="40%" cy="30%" r="60%">
+      <stop offset="0%"   stop-color="#2a2a2a"/>
+      <stop offset="100%" stop-color="#0c0c0c"/>
+    </radialGradient>
+  </defs>
+</svg>
+
+<div id="app">
+  <!-- ── Main display ── -->
+  <div id="main">
+    <div id="grid-container">
+      <div id="iris-grid"></div>
+    </div>
+
+    <!-- Debug panel (bottom-left) -->
+    <div id="debug-panel">
+      <video id="debug-camera" autoplay muted playsinline></video>
+      <canvas id="debug-grid-canvas" width="24" height="13"></canvas>
+      <div id="debug-labels">
+        <div>Camera</div>
+        <div>24×13 grid</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Sidebar ── -->
+  <div id="sidebar">
+    <div id="sidebar-scroll">
+
+      <!-- Mode indicator -->
+      <div class="sidebar-section">
+        <h3>Status</h3>
+        <div id="mode-badge" class="idle">
+          <div id="mode-dot"></div>
+          <span id="mode-label">IDLE</span>
+        </div>
+      </div>
+
+      <!-- Image processing -->
+      <div class="sidebar-section">
+        <h3>Processing</h3>
+        <div class="seg-control" id="processing-seg">
+          <button class="seg-btn active" data-mode="greyscale">Grey</button>
+          <button class="seg-btn" data-mode="edge">Edge</button>
+          <button class="seg-btn" data-mode="posterised">Post.</button>
+        </div>
+      </div>
+
+      <!-- Sliders -->
+      <div class="sidebar-section">
+        <h3>Output</h3>
+        <div class="control-row">
+          <label>Brightness <span id="brightness-val">80</span></label>
+          <input type="range" id="brightness" min="0" max="100" value="80">
+        </div>
+        <div class="control-row">
+          <label>Contrast <span id="contrast-val">60</span></label>
+          <input type="range" id="contrast" min="0" max="100" value="60">
+        </div>
+        <div class="control-row">
+          <label>Wave speed <span id="wave-val">40</span>ms</label>
+          <input type="range" id="wave-speed" min="10" max="150" value="40">
+        </div>
+      </div>
+
+      <!-- Hardware -->
+      <div class="sidebar-section">
+        <h3>Hardware</h3>
+        <div class="toggle-row">
+          <span>Hardware mode</span>
+          <label class="toggle">
+            <input type="checkbox" id="hw-toggle">
+            <div class="toggle-track"></div>
+          </label>
+        </div>
+        <div id="ws-status">WebSocket: inactive</div>
+      </div>
+
+      <!-- Debug / force -->
+      <div class="sidebar-section">
+        <h3>Debug</h3>
+        <div class="btn-row" style="margin-bottom:8px">
+          <button class="btn" id="force-idle">Force IDLE</button>
+          <button class="btn" id="force-reflect">Force REFLECT</button>
+        </div>
+        <div class="toggle-row">
+          <span>Camera debug view</span>
+          <label class="toggle">
+            <input type="checkbox" id="debug-toggle">
+            <div class="toggle-track"></div>
+          </label>
+        </div>
+      </div>
+
+      <!-- Content editor -->
+      <div class="sidebar-section">
+        <h3>Content</h3>
+        <button class="btn primary" id="open-editor" style="width:100%">Open Content Editor</button>
+      </div>
+
+    </div><!-- /sidebar-scroll -->
+  </div><!-- /sidebar -->
+
+  <!-- Sidebar toggle tab -->
+  <button id="sidebar-toggle" title="Toggle sidebar">◀</button>
+</div><!-- /app -->
+
+<!-- Content editor overlay (mounted by ContentEditor.js) -->
+<div id="editor-overlay"></div>
+
+<!-- Hidden processing canvas -->
+<canvas id="proc-canvas" style="display:none"></canvas>
+
+<script type="module">
+import { CONFIG }            from './config.js';
+import { ApertureController } from './core/ApertureController.js';
+import { ImageProcessor }     from './core/ImageProcessor.js';
+import { FaceDetector }       from './core/FaceDetector.js';
+import { ContentEngine }      from './content/ContentEngine.js';
+import { ControlPanel }       from './ui/ControlPanel.js';
+import { ContentEditor }      from './ui/ContentEditor.js';
+import { WebSocketBridge }    from './hardware/WebSocketBridge.js';
+
+// ── Boot ────────────────────────────────────────────────────────────────────
+
+const controller   = new ApertureController(document.getElementById('iris-grid'));
+const imgProcessor = new ImageProcessor(document.getElementById('proc-canvas'));
+const faceDetector = new FaceDetector();
+const content      = new ContentEngine(controller);
+const bridge       = new WebSocketBridge(controller);
+const panel        = new ControlPanel({ controller, imgProcessor, faceDetector, content, bridge });
+const editor       = new ContentEditor(document.getElementById('editor-overlay'), content);
+
+// Wire face detection → mode FSM
+faceDetector.on('faceEnter', () => controller.setMode('TRANSITIONING'));
+faceDetector.on('faceExit',  () => {
+  setTimeout(() => {
+    if (controller.currentMode === 'REFLECTION') controller.setMode('IDLE');
+  }, CONFIG.FACE_LOST_TIMEOUT_MS);
+});
+
+// Wire controller frame updates to hardware bridge
+controller.onFrameUpdate(frame => bridge.sendFrame(frame));
+
+// Wire transition complete → reflection mode
+controller.onTransitionComplete(() => {
+  faceDetector.start(document.getElementById('debug-camera'));
+  controller.setMode('REFLECTION');
+});
+
+// ── Camera/reflection loop ───────────────────────────────────────────────────
+let lastCameraTime = 0;
+const cameraInterval = 1000 / CONFIG.TARGET_FPS_CAMERA;
+
+function reflectionTick(now) {
+  if (controller.currentMode === 'REFLECTION') {
+    if (now - lastCameraTime >= cameraInterval) {
+      lastCameraTime = now;
+      const frame = imgProcessor.processFrame(panel.processingMode, panel.brightness, panel.contrast);
+      if (frame) controller.setFrame(frame);
+    }
+  }
+  requestAnimationFrame(reflectionTick);
+}
+
+// ── Start ────────────────────────────────────────────────────────────────────
+async function boot() {
+  await controller.init();     // build grid DOM
+  await content.init();        // load playlist
+  content.start();             // begin idle sequences
+  await faceDetector.load();   // load MediaPipe model
+
+  // Start camera preview (silent — face detection listens on it)
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+    const vid = document.getElementById('debug-camera');
+    vid.srcObject = stream;
+    await vid.play();
+    imgProcessor.setSource(vid);
+    faceDetector.start(vid);
+  } catch (e) {
+    console.warn('[Boot] No camera access:', e.message);
+  }
+
+  requestAnimationFrame(reflectionTick);
+  panel.init();
+  editor.init();
+
+  // Sidebar toggle
+  const sidebar = document.getElementById('sidebar');
+  const toggle  = document.getElementById('sidebar-toggle');
+  toggle.addEventListener('click', () => {
+    const collapsed = sidebar.classList.toggle('collapsed');
+    toggle.textContent = collapsed ? '▶' : '◀';
+    toggle.style.right = collapsed ? '8px' : `calc(${getComputedStyle(document.documentElement).getPropertyValue('--sidebar-w')} + 8px)`;
+  });
+}
+
+boot().catch(e => console.error('[Boot] Fatal:', e));
+</script>
+</body>
+</html>
