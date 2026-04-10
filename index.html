@@ -501,6 +501,7 @@ controller.onFrameUpdate(frame => bridge.sendFrame(frame));
 // Wire transition complete → reflection mode
 controller.onTransitionComplete(() => {
   faceDetector.start(document.getElementById('debug-camera'));
+  imgProcessor.resetBackground();   // fresh background each time we enter reflection
   controller.setMode('REFLECTION');
 });
 

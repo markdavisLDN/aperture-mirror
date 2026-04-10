@@ -36,6 +36,7 @@ export class ApertureController {
     this._lastTime     = 0;
     this._waveActive   = false;
     this._unlockedCols = null;   // null = unrestricted; Set during wave reopen phase
+    this._modeLocked   = false;  // true = face detection cannot change mode
   }
 
   // ── Init ──────────────────────────────────────────────────────────────────
@@ -194,16 +195,38 @@ export class ApertureController {
     this._notifyCallbacks();
   }
 
+  /**
+   * Automatic mode change — blocked when mode is locked by forceMode().
+   */
   setMode(mode) {
+    if (this._modeLocked) return;
+    this._applyMode(mode);
+  }
+
+  /**
+   * Force a mode directly, bypassing face detection and locking it.
+   * Call forceMode(null) to release the lock.
+   */
+  forceMode(mode) {
+    if (mode === null) {
+      this._modeLocked = false;
+      return;
+    }
+    this._modeLocked = true;
+    this._applyMode(mode);
+    this._updateLockUI(true);
+  }
+
+  _applyMode(mode) {
     if (this._mode === mode) return;
     this._mode = mode;
     this._updateModeUI(mode);
 
     if (mode === 'IDLE') {
-      // Content engine takes over (notified via event)
+      this._modeLocked = false;
+      this._updateLockUI(false);
       document.dispatchEvent(new CustomEvent('aperture:idle'));
     } else if (mode === 'TRANSITIONING') {
-      // Wave: close all L→R, then trigger transition-complete
       const currentFrame = Array.from(this._frame);
       const closedFrame  = new Array(TOTAL).fill(0);
       this.runWaveTransition(currentFrame, closedFrame, () => {
@@ -263,6 +286,14 @@ export class ApertureController {
     if (!badge) return;
     badge.className = mode.toLowerCase();
     label.textContent = mode === 'TRANSITIONING' ? 'TRANSIT' : mode;
+  }
+
+  _updateLockUI(locked) {
+    const btn = document.getElementById('force-reflect');
+    if (!btn) return;
+    btn.textContent = locked ? 'Unlock' : 'Force REFLECT';
+    btn.style.borderColor = locked ? 'var(--teal)' : '';
+    btn.style.color       = locked ? 'var(--teal)' : '';
   }
 
   // Resize grid cells to fill viewport

@@ -100,10 +100,21 @@ export class ControlPanel {
 
   _bindForceButtons() {
     document.getElementById('force-idle')?.addEventListener('click', () => {
-      this._ctrl.setMode('IDLE');
+      this._ctrl.forceMode(null);   // release lock first
+      this._ctrl._applyMode('IDLE');
     });
-    document.getElementById('force-reflect')?.addEventListener('click', () => {
-      this._ctrl.setMode('REFLECTION');
+
+    const reflectBtn = document.getElementById('force-reflect');
+    reflectBtn?.addEventListener('click', () => {
+      if (this._ctrl._modeLocked && this._ctrl.currentMode === 'REFLECTION') {
+        // Toggle off — release lock and return to IDLE
+        this._ctrl.forceMode(null);
+        this._ctrl._applyMode('IDLE');
+      } else {
+        // Lock into REFLECTION, skip wave transition
+        this._img.resetBackground();
+        this._ctrl.forceMode('REFLECTION');
+      }
     });
   }
 
