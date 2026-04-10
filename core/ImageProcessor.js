@@ -169,8 +169,11 @@ export class ImageProcessor {
     if (!this._segmenter || !this._source) return null;
     try {
       const result = this._segmenter.segmentForVideo(this._source, timestamp);
-      const mask   = result.confidenceMasks?.[0];
+      // confidenceMasks[0] = background probability, [1] = person probability
+      const masks  = result.confidenceMasks;
+      const mask   = masks?.[1] ?? masks?.[0];
       if (!mask) return null;
+      const invertFallback = !masks?.[1]; // only one mask → it's background, invert it
 
       const vw = this._source.videoWidth  || 640;
       const vh = this._source.videoHeight || 480;
@@ -187,7 +190,8 @@ export class ImageProcessor {
         for (let col = 0; col < vw; col++) {
           const srcIdx = row * vw + (vw - 1 - col); // flip
           const dstIdx = row * vw + col;
-          const v = maskData[srcIdx] * 255;
+          const raw = maskData[srcIdx];
+          const v = (invertFallback ? 1 - raw : raw) * 255;
           imgData.data[dstIdx*4]   = v;
           imgData.data[dstIdx*4+1] = v;
           imgData.data[dstIdx*4+2] = v;
@@ -209,7 +213,7 @@ export class ImageProcessor {
         out[i]     = s * 255;
       }
 
-      mask.close(); // free GPU texture
+      masks.forEach(m => m.close()); // free GPU textures
       return out;
 
     } catch (e) {
