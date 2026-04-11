@@ -153,7 +153,7 @@ export class ApertureController {
 
   _updateCurrent(dt) {
     // Exponential approach: ~80ms settle time
-    const alpha = 1 - Math.exp(-dt / 0.04);
+    const alpha = 1 - Math.exp(-dt / 0.25); // 0.25s time constant — slower, less jitter
     for (let i = 0; i < TOTAL; i++) {
       this._current[i] += (this._frame[i] - this._current[i]) * alpha;
     }

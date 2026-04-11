@@ -8,12 +8,12 @@ export const CONFIG = {
   // Aperture rendering
   BLADE_COUNT: 6,
   // Blade rotation: degrees of travel from fully open to fully closed
-  BLADE_OPEN_ANGLE: -22,   // degrees when open (blades retracted)
-  BLADE_CLOSE_ANGLE: 40,   // degrees when closed (blades covering centre)
-  IRIS_TRANSITION_MS: 80,  // CSS transition duration for blade movement
+  BLADE_OPEN_ANGLE: 55,    // degrees when open (blades retracted) — was -22, geometry is inverted
+  BLADE_CLOSE_ANGLE: -30,  // degrees when closed (blades covering centre) — was 40
+  IRIS_TRANSITION_MS: 400,
 
   // Camera / processing
-  TARGET_FPS_CAMERA: 24,
+  TARGET_FPS_CAMERA: 8,   // low fps = less jitter, apertures settle between frames
   TARGET_FPS_RENDER: 60,
   FACE_LOST_TIMEOUT_MS: 8000,
 

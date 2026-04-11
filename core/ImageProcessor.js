@@ -278,7 +278,7 @@ export class ImageProcessor {
     // Outside face ellipse → BG_OPEN (slightly open, like the grey circles
     // in the reference image — background is NOT fully closed).
     // Inside face → portrait values, blending to BG_OPEN at the edge.
-    const BG_OPEN = 35; // ~14% open for background
+    const BG_OPEN = 0; // fully closed outside face — black surround
     const cx = (COLS - 1) / 2, cy = (ROWS - 1) / 2;
     const rx = COLS * 0.44,    ry = ROWS * 0.44;
     const out = new Array(TOTAL);
@@ -299,19 +299,16 @@ export class ImageProcessor {
   }
 
   /**
-   * Face portrait — 3-level posterized output matching the reference aesthetic:
-   *   dark shadow  → 0   (fully closed)
-   *   mid tone     → 110 (~43% open)
-   *   highlight    → 255 (fully open)
+   * Face portrait — median-anchored, 3-level posterized.
    *
-   * Histogram anchored to CENTRAL face pixels only (inner ellipse) so a bright
-   * background wall doesn't set the white-point and invert the face.
+   * Uses the MEDIAN of the central face pixels as the skin-tone reference.
+   * Pixels brighter than skin → open; darker → closed.
+   * This is lighting-direction agnostic — works whether the wall behind
+   * is brighter or darker than the face.
    */
   _faceContrast(grey) {
     const cx = (COLS - 1) / 2, cy = (ROWS - 1) / 2;
-
-    // Collect pixels from the inner face core only (ignores background edges)
-    const coreRx = COLS * 0.27, coreRy = ROWS * 0.27;
+    const coreRx = COLS * 0.25, coreRy = ROWS * 0.25;
     const core = [];
     for (let r = 0; r < ROWS; r++)
       for (let c = 0; c < COLS; c++) {
@@ -321,17 +318,21 @@ export class ImageProcessor {
 
     if (core.length < 8) return grey.map(() => 0);
     core.sort((a, b) => a - b);
-    const lo    = core[Math.floor(core.length * 0.10)]; // p10 dark anchor
-    const hi    = core[Math.floor(core.length * 0.90)]; // p90 bright anchor
-    const range = hi - lo;
-    if (range < 5) return grey.map(() => 0);
 
-    // 3-level posterize: clean and bold like the reference image
+    // Median = skin tone. Spread = local contrast around that tone.
+    const median = core[Math.floor(core.length * 0.50)];
+    const spread = Math.max(
+      core[Math.floor(core.length * 0.85)] - median,
+      median - core[Math.floor(core.length * 0.15)],
+      12
+    );
+
+    // Map relative to skin tone: brighter → open, darker → closed
     return grey.map(v => {
-      const norm = Math.max(0, Math.min(1, (v - lo) / range));
-      if (norm < 0.30) return 0;   // shadow → closed
-      if (norm < 0.65) return 110; // midtone → ~43% open
-      return 255;                   // highlight → fully open
+      const delta = (v - median) / spread;
+      if (delta >  0.25) return 255; // highlight (brighter than skin) → open
+      if (delta > -0.35) return 110; // near skin tone → mid
+      return 0;                       // shadow (darker than skin) → closed
     });
   }
 
