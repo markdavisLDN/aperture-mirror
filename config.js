@@ -2,8 +2,8 @@
 export const CONFIG = {
   // Grid
   GRID_COLS: 24,
-  GRID_ROWS: 13,
-  TOTAL_APERTURES: 312,
+  GRID_ROWS: 16,
+  TOTAL_APERTURES: 384,
 
   // Aperture rendering
   BLADE_COUNT: 6,

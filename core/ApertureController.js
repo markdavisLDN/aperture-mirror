@@ -304,7 +304,7 @@ export class ApertureController {
     const vh = main.clientHeight - 20;
     const cellW = Math.floor((vw - (COLS - 1) * 3) / COLS);
     const cellH = Math.floor((vh - (ROWS - 1) * 3) / ROWS);
-    const cell  = Math.min(cellW, cellH);
+    const cell  = Math.floor(Math.min(cellW, cellH) * 0.9);
     const totalW = cell * COLS + (COLS - 1) * 3;
     const totalH = cell * ROWS + (ROWS - 1) * 3;
     const container = document.getElementById('grid-container');
