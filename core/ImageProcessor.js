@@ -275,41 +275,63 @@ export class ImageProcessor {
     const grey    = this._toGreyscale(imgData);
     const detail  = this._faceContrast(grey);
 
-    // Elliptical vignette: smoothly zero out background within the crop
-    // so the face reads as a portrait on pure black, matching the reference.
+    // Outside face ellipse → BG_OPEN (slightly open, like the grey circles
+    // in the reference image — background is NOT fully closed).
+    // Inside face → portrait values, blending to BG_OPEN at the edge.
+    const BG_OPEN = 35; // ~14% open for background
     const cx = (COLS - 1) / 2, cy = (ROWS - 1) / 2;
-    const rx = COLS / 2,       ry = ROWS / 2;
+    const rx = COLS * 0.44,    ry = ROWS * 0.44;
     const out = new Array(TOTAL);
     for (let r = 0; r < ROWS; r++) {
       for (let c = 0; c < COLS; c++) {
         const idx = r * COLS + c;
         const dx = (c - cx) / rx, dy = (r - cy) / ry;
-        const dist = Math.sqrt(dx * dx + dy * dy); // 0 = centre, 1 = edge
-        // Smooth cosine falloff: full value inside 0.75 radius, fades to 0 at 1.0
-        const mask = dist < 0.75 ? 1 : Math.max(0, Math.cos((dist - 0.75) / 0.25 * Math.PI * 0.5));
-        out[idx] = detail[idx] * mask;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist >= 1) {
+          out[idx] = BG_OPEN;
+        } else {
+          const blend = dist < 0.80 ? 1 : (1 - dist) / 0.20;
+          out[idx] = detail[idx] * blend + BG_OPEN * (1 - blend);
+        }
       }
     }
     return out;
   }
 
   /**
-   * Full halftone-portrait pipeline optimised for 24×16:
-   * Stripped-back pipeline — validate the crop is correct before
-   * adding enhancement stages. Just percentile stretch + gamma lift.
-   * The contrast slider (×1.9 factor) handles the final push.
+   * Face portrait — 3-level posterized output matching the reference aesthetic:
+   *   dark shadow  → 0   (fully closed)
+   *   mid tone     → 110 (~43% open)
+   *   highlight    → 255 (fully open)
+   *
+   * Histogram anchored to CENTRAL face pixels only (inner ellipse) so a bright
+   * background wall doesn't set the white-point and invert the face.
    */
   _faceContrast(grey) {
-    const n      = grey.length;
-    const sorted = grey.slice().sort((a, b) => a - b);
-    const lo     = sorted[Math.floor(n * 0.05)]; // p5 — clip dark outliers
-    const hi     = sorted[Math.floor(n * 0.95)]; // p95 — clip bright outliers
-    const range  = hi - lo;
+    const cx = (COLS - 1) / 2, cy = (ROWS - 1) / 2;
+
+    // Collect pixels from the inner face core only (ignores background edges)
+    const coreRx = COLS * 0.27, coreRy = ROWS * 0.27;
+    const core = [];
+    for (let r = 0; r < ROWS; r++)
+      for (let c = 0; c < COLS; c++) {
+        const dx = (c - cx) / coreRx, dy = (r - cy) / coreRy;
+        if (dx * dx + dy * dy <= 1) core.push(grey[r * COLS + c]);
+      }
+
+    if (core.length < 8) return grey.map(() => 0);
+    core.sort((a, b) => a - b);
+    const lo    = core[Math.floor(core.length * 0.10)]; // p10 dark anchor
+    const hi    = core[Math.floor(core.length * 0.90)]; // p90 bright anchor
+    const range = hi - lo;
     if (range < 5) return grey.map(() => 0);
 
+    // 3-level posterize: clean and bold like the reference image
     return grey.map(v => {
-      const norm = Math.max(0, Math.min(1, (v - lo) / range)); // linear 0-1
-      return Math.pow(norm, 0.5) * 255;                         // gamma 0.5 lifts midtones
+      const norm = Math.max(0, Math.min(1, (v - lo) / range));
+      if (norm < 0.30) return 0;   // shadow → closed
+      if (norm < 0.65) return 110; // midtone → ~43% open
+      return 255;                   // highlight → fully open
     });
   }
 
