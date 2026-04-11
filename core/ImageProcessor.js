@@ -108,13 +108,17 @@ export class ImageProcessor {
    * @param {number} brightness  0–100
    * @param {number} contrast    0–100
    * @param {number} timestamp   performance.now() — required for segmenter
+   * @param {object|null} faceBbox  { x, y, w, h } raw video px — crops to face when present
    */
-  processFrame(mode, brightness, contrast, timestamp = performance.now()) {
+  processFrame(mode, brightness, contrast, timestamp = performance.now(), faceBbox = null) {
     if (!this._source || this._source.readyState < 2) return null;
 
     let processed = null;
 
-    if (mode === 'segment' && this._segReady) {
+    // Face-zoom mode: crop to detected face and show portrait luminance detail
+    if (faceBbox) {
+      processed = this._processFaceCrop(faceBbox);
+    } else if (mode === 'segment' && this._segReady) {
       processed = this._segmentFrame(timestamp);
     }
 
@@ -233,6 +237,66 @@ export class ImageProcessor {
     } catch (e) {
       return null;
     }
+  }
+
+  // ── Face crop (portrait detail) ───────────────────────────────────────────
+
+  /**
+   * Crop the raw video frame to the face bbox (with generous padding),
+   * downsample to the aperture grid, and return continuous luminance values
+   * so that forehead highlights, eye sockets, cheekbones all drive different
+   * aperture opening levels — giving a halftone-portrait effect.
+   *
+   * @param {{ x, y, w, h }} rawBbox  Face bbox in raw (unmirrored) video pixels
+   */
+  _processFaceCrop(rawBbox) {
+    if (!this._source) return null;
+    const vw = this._source.videoWidth  || 640;
+    const vh = this._source.videoHeight || 480;
+
+    // Expand bbox with padding: 50% sides, 70% top (forehead), 40% bottom (chin)
+    const padX  = rawBbox.w * 0.5;
+    const padYt = rawBbox.h * 0.7;
+    const padYb = rawBbox.h * 0.4;
+    const sx = Math.max(0, rawBbox.x - padX);
+    const sy = Math.max(0, rawBbox.y - padYt);
+    const sw = Math.min(vw - sx, rawBbox.w + padX * 2);
+    const sh = Math.min(vh - sy, rawBbox.h + padYt + padYb);
+
+    // Draw the crop into the 24×16 canvas, horizontally flipped (mirror view)
+    const ctx = this._ctx;
+    ctx.save();
+    ctx.translate(COLS, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(this._source, sx, sy, sw, sh, 0, 0, COLS, ROWS);
+    ctx.restore();
+
+    const imgData = ctx.getImageData(0, 0, COLS, ROWS).data;
+    const grey    = this._toGreyscale(imgData);
+    return this._faceContrast(grey);
+  }
+
+  /**
+   * Stretch the tonal range of the face crop and apply a soft sigmoid
+   * so all intermediate aperture states (10%, 30%, 60% open…) are used —
+   * giving visible face structure rather than a flat binary silhouette.
+   */
+  _faceContrast(grey) {
+    // 1. Auto-contrast: stretch the actual range to 0–255
+    let lo = 255, hi = 0;
+    for (const v of grey) { if (v < lo) lo = v; if (v > hi) hi = v; }
+    const range = hi - lo;
+    if (range < 10) return grey.map(() => 0); // no signal — face not lit
+
+    const scale = 255 / range;
+
+    // 2. Soft sigmoid (steepness 5) — preserves gradations across all aperture
+    //    levels rather than snapping to fully-open / fully-closed.
+    //    0.45 centre biases toward slightly-open so shadow detail shows.
+    return grey.map(v => {
+      const norm = (v - lo) * scale / 255; // 0–1 stretched
+      return (1 / (1 + Math.exp(-5 * (norm - 0.45)))) * 255;
+    });
   }
 
   // ── Luminance pipeline ────────────────────────────────────────────────────

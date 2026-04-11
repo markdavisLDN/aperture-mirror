@@ -513,7 +513,7 @@ function reflectionTick(now) {
   if (controller.currentMode === 'REFLECTION') {
     if (now - lastCameraTime >= cameraInterval) {
       lastCameraTime = now;
-      const frame = imgProcessor.processFrame(panel.processingMode, panel.brightness, panel.contrast, now);
+      const frame = imgProcessor.processFrame(panel.processingMode, panel.brightness, panel.contrast, now, faceDetector.bbox);
       if (frame) controller.setFrame(frame);
     }
   }

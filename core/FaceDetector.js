@@ -15,6 +15,7 @@ export class FaceDetector {
     this._listeners = { faceEnter: [], faceExit: [] };
     this._loaded    = false;
     this._fallback  = false;
+    this._bbox      = null; // { x, y, w, h } raw video pixel coords, updated each frame
   }
 
   // ── Load MediaPipe model ──────────────────────────────────────────────────
@@ -71,8 +72,15 @@ export class FaceDetector {
       if (!this._running) return;
       if (this._source && this._source.readyState >= 2 && this._detector) {
         try {
-          const result = this._detector.detectForVideo(this._source, now);
+          const result   = this._detector.detectForVideo(this._source, now);
           const detected = result.detections.length > 0;
+          if (detected) {
+            // Pick highest-confidence detection; bbox in raw video pixel coords
+            const bb = result.detections[0].boundingBox;
+            this._bbox = { x: bb.originX, y: bb.originY, w: bb.width, h: bb.height };
+          } else {
+            this._bbox = null;
+          }
           this._update(detected);
         } catch (_) { /* frame not ready */ }
       }
@@ -121,4 +129,5 @@ export class FaceDetector {
 
   get hasFace()  { return this._hasFace; }
   get isLoaded() { return this._loaded; }
+  get bbox()     { return this._bbox; }  // null when no face detected
 }
