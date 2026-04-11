@@ -204,13 +204,27 @@ export class ImageProcessor {
       this._ctx.drawImage(this._maskCanvas, 0, 0, COLS, ROWS);
       const small = this._ctx.getImageData(0, 0, COLS, ROWS);
 
-      // Hard threshold: person (confidence ≥ 0.35) → fully open,
-      // background → fully closed. Binary output matches physical reference.
-      const out = new Array(TOTAL);
+      // Threshold: person (confidence ≥ 0.20) → fully open,
+      // background → fully closed. Lower threshold captures hands/arms.
+      const raw = new Array(TOTAL);
       for (let i = 0; i < TOTAL; i++) {
-        const norm = small.data[i * 4] / 255;            // 0–1
-        const s    = 1 / (1 + Math.exp(-22 * (norm - 0.35))); // steep sigmoid at lower threshold
-        out[i]     = s * 255;
+        const norm = small.data[i * 4] / 255;
+        raw[i] = (1 / (1 + Math.exp(-16 * (norm - 0.20)))) * 255;
+      }
+
+      // Morphological dilation: expand detected regions by 1 cell
+      // so fingers/edges aren't clipped at the 24×13 resolution
+      const out = new Array(TOTAL);
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const idx = r * COLS + c;
+          let best = raw[idx];
+          if (r > 0)          best = Math.max(best, raw[(r-1)*COLS + c]);
+          if (r < ROWS-1)     best = Math.max(best, raw[(r+1)*COLS + c]);
+          if (c > 0)          best = Math.max(best, raw[r*COLS + (c-1)]);
+          if (c < COLS-1)     best = Math.max(best, raw[r*COLS + (c+1)]);
+          out[idx] = best;
+        }
       }
 
       masks.forEach(m => m.close()); // free GPU textures
