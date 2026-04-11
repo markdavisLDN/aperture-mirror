@@ -1,9 +1,9 @@
 // Central config — tune these constants without touching module code
 export const CONFIG = {
   // Grid
-  GRID_COLS: 24,
-  GRID_ROWS: 16,
-  TOTAL_APERTURES: 384,
+  GRID_COLS: 26,
+  GRID_ROWS: 18,
+  TOTAL_APERTURES: 468, // +~10% each dimension vs original 24×16
 
   // Aperture rendering
   BLADE_COUNT: 6,
