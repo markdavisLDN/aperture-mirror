@@ -1,9 +1,9 @@
 // Central config — tune these constants without touching module code
 export const CONFIG = {
   // Grid
-  GRID_COLS: 26,
-  GRID_ROWS: 18,
-  TOTAL_APERTURES: 468, // +~10% each dimension vs original 24×16
+  GRID_COLS: 32,
+  GRID_ROWS: 24,
+  TOTAL_APERTURES: 768, // 32×24 — research-backed solid recognition threshold
 
   // Aperture rendering
   BLADE_COUNT: 6,
