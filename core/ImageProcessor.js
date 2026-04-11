@@ -278,9 +278,9 @@ export class ImageProcessor {
     const greyRaw = this._toGreyscale(imgData);
 
     // Temporal smoothing: blend each new frame into a running average.
-    // ALPHA=0.15 → ~6-7 frames to converge, ~1s at 6fps.
-    // Eliminates flicker on still face; still tracks real movement.
-    const ALPHA = 0.15;
+    // ALPHA=0.25 → ~4 frames to converge, ~0.7s at 6fps.
+    // Reduces flicker while still tracking real face movement.
+    const ALPHA = 0.25;
     if (!this._faceGreyAvg || this._faceGreyAvg.length !== TOTAL) {
       this._faceGreyAvg = greyRaw.slice();
     } else {
@@ -314,12 +314,20 @@ export class ImageProcessor {
   }
 
   /**
-   * Face portrait — median-anchored, 3-level posterized.
+   * Face portrait — median-anchored, 5-level posterized.
    *
    * Uses the MEDIAN of the central face pixels as the skin-tone reference.
-   * Pixels brighter than skin → open; darker → closed.
+   * Pixels brighter than skin → more open; darker → more closed.
+   * 5 levels give visible gradation: highlights / light-skin / mid-skin / shadow / deep-shadow.
    * This is lighting-direction agnostic — works whether the wall behind
    * is brighter or darker than the face.
+   *
+   * Level mapping (aperture value → visual result):
+   *   255 = fully open  (forehead highlight, nose bridge catch-light)
+   *   192 = mostly open (lighter cheek, lit skin)
+   *   110 = half open   (average skin tone)
+   *    50 = mostly closed (cheek shadow, beard, under-chin)
+   *     0 = fully closed (eye sockets, hair, nostrils)
    */
   _faceContrast(grey) {
     const cx = (COLS - 1) / 2, cy = (ROWS - 1) / 2;
@@ -342,12 +350,14 @@ export class ImageProcessor {
       12
     );
 
-    // Map relative to skin tone: brighter → open, darker → closed
+    // 5-level posterize relative to skin tone
     return grey.map(v => {
       const delta = (v - median) / spread;
-      if (delta >  0.25) return 255; // highlight (brighter than skin) → open
-      if (delta > -0.35) return 110; // near skin tone → mid
-      return 0;                       // shadow (darker than skin) → closed
+      if (delta >  0.50) return 255; // bright highlight → fully open
+      if (delta >  0.10) return 192; // lighter than skin → mostly open
+      if (delta > -0.25) return 110; // near skin tone → mid
+      if (delta > -0.65) return  50; // shadow → mostly closed
+      return 0;                       // deep shadow → fully closed
     });
   }
 

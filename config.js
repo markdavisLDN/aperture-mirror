@@ -8,8 +8,8 @@ export const CONFIG = {
   // Aperture rendering
   BLADE_COUNT: 6,
   // Blade rotation: degrees of travel from fully open to fully closed
-  BLADE_OPEN_ANGLE: 55,    // degrees when open (blades retracted)
-  BLADE_CLOSE_ANGLE: -55,  // degrees when closed — more extreme to ensure full blackout
+  BLADE_OPEN_ANGLE: 40,    // degrees when open (blades retracted, star pattern visible)
+  BLADE_CLOSE_ANGLE: -22,  // degrees when closed (small dot, fully opaque) — DO NOT go below -22 or blades swing open again
   IRIS_TRANSITION_MS: 400,
 
   // Camera / processing
