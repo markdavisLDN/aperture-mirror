@@ -277,26 +277,78 @@ export class ImageProcessor {
   }
 
   /**
-   * Stretch the tonal range of the face crop and apply a soft sigmoid
-   * so all intermediate aperture states (10%, 30%, 60% open…) are used —
-   * giving visible face structure rather than a flat binary silhouette.
+   * Full halftone-portrait pipeline optimised for 24×16:
+   *   1. Percentile stretch (p2/p98) — handles mixed ambient lighting
+   *   2. CLAHE approximation (4×4 tiles) — recovers eye-socket / cheek detail
+   *   3. Gamma 0.65 — lifts face midtones into the useful aperture range
+   *   4. Unsharp mask (radius 1, amount 0.4) — sharpens at grid level
+   *   5. 15% Sobel edge blend — adds jawline / brow-ridge / nose structure
    */
   _faceContrast(grey) {
-    // 1. Auto-contrast: stretch the actual range to 0–255
-    let lo = 255, hi = 0;
-    for (const v of grey) { if (v < lo) lo = v; if (v > hi) hi = v; }
-    const range = hi - lo;
-    if (range < 10) return grey.map(() => 0); // no signal — face not lit
+    const n = grey.length;
 
-    const scale = 255 / range;
+    // ── 1. Percentile stretch p2/p98 ─────────────────────────────────────────
+    const sorted = grey.slice().sort((a, b) => a - b);
+    const p2  = sorted[Math.floor(n * 0.02)];
+    const p98 = sorted[Math.floor(n * 0.98)];
+    const pr  = p98 - p2;
+    if (pr < 8) return grey.map(() => 0); // too dark / no signal
 
-    // 2. Soft sigmoid (steepness 5) — preserves gradations across all aperture
-    //    levels rather than snapping to fully-open / fully-closed.
-    //    0.45 centre biases toward slightly-open so shadow detail shows.
-    return grey.map(v => {
-      const norm = (v - lo) * scale / 255; // 0–1 stretched
-      return (1 / (1 + Math.exp(-5 * (norm - 0.45)))) * 255;
-    });
+    const s1 = grey.map(v => Math.max(0, Math.min(1, (v - p2) / pr)));
+
+    // ── 2. CLAHE approximation — 4×4 tiles, local contrast stretch ───────────
+    const TW = 4, TH = 4;
+    const s2 = new Array(n);
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const idx = r * COLS + c;
+        const r0 = Math.floor(r / TH) * TH, r1 = Math.min(r0 + TH, ROWS);
+        const c0 = Math.floor(c / TW) * TW, c1 = Math.min(c0 + TW, COLS);
+        let lo = 1, hi = 0;
+        for (let lr = r0; lr < r1; lr++)
+          for (let lc = c0; lc < c1; lc++) {
+            const v = s1[lr * COLS + lc];
+            if (v < lo) lo = v; if (v > hi) hi = v;
+          }
+        const lr = hi - lo;
+        s2[idx] = lr > 0.05 ? Math.max(0, Math.min(1, (s1[idx] - lo) / lr)) : s1[idx];
+      }
+    }
+
+    // ── 3. Gamma 0.65 — lift face midtones ───────────────────────────────────
+    const s3 = s2.map(v => Math.pow(v, 0.65));
+
+    // ── 4. Unsharp mask — radius 1, amount 0.4, threshold 0.05 ───────────────
+    const s4 = new Array(n);
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const idx = r * COLS + c;
+        let sum = 0, cnt = 0;
+        for (let dr = -1; dr <= 1; dr++)
+          for (let dc = -1; dc <= 1; dc++) {
+            const nr = r + dr, nc = c + dc;
+            if (nr >= 0 && nr < ROWS && nc >= 0 && nc < COLS) { sum += s3[nr * COLS + nc]; cnt++; }
+          }
+        const blur = sum / cnt;
+        const diff = s3[idx] - blur;
+        s4[idx] = Math.max(0, Math.min(1, Math.abs(diff) > 0.05 ? s3[idx] + 0.4 * diff : s3[idx]));
+      }
+    }
+
+    // ── 5. 15% Sobel edge blend — adds brow / jawline / nose structure ────────
+    const get = (r, c) => s4[Math.max(0,Math.min(ROWS-1,r)) * COLS + Math.max(0,Math.min(COLS-1,c))];
+    const out = new Array(n);
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const idx = r * COLS + c;
+        const gx = -get(r-1,c-1) + get(r-1,c+1) - 2*get(r,c-1) + 2*get(r,c+1) - get(r+1,c-1) + get(r+1,c+1);
+        const gy = -get(r-1,c-1) - 2*get(r-1,c) - get(r-1,c+1) + get(r+1,c-1) + 2*get(r+1,c) + get(r+1,c+1);
+        const edge = Math.min(1, Math.sqrt(gx*gx + gy*gy) / 5.66); // normalise max Sobel ≈ √32
+        out[idx] = Math.max(0, Math.min(1, 0.85 * s4[idx] + 0.15 * edge)) * 255;
+      }
+    }
+
+    return out;
   }
 
   // ── Luminance pipeline ────────────────────────────────────────────────────
