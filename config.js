@@ -26,5 +26,5 @@ export const CONFIG = {
 
   // Brightness / contrast defaults (0–100)
   DEFAULT_BRIGHTNESS: 100,
-  DEFAULT_CONTRAST: 70,
+  DEFAULT_CONTRAST: 82,  // higher contrast pushes skin-tone (90) toward closed, highlights stay at 255
 };

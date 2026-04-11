@@ -314,24 +314,24 @@ export class ImageProcessor {
   }
 
   /**
-   * Face portrait — median-anchored, 5-level posterized.
+   * Face portrait — high-contrast 3-level posterize.
    *
-   * Uses the MEDIAN of the central face pixels as the skin-tone reference.
-   * Pixels brighter than skin → more open; darker → more closed.
-   * 5 levels give visible gradation: highlights / light-skin / mid-skin / shadow / deep-shadow.
-   * This is lighting-direction agnostic — works whether the wall behind
-   * is brighter or darker than the face.
+   * Design goal matches the reference: ONLY bright highlights are fully open
+   * (forehead catch-light, nose bridge, cheek bone). Everything at or below
+   * average skin tone is pushed toward closed. Deep shadows are fully closed.
+   * Result: face reads clearly against a fully-closed black background.
    *
-   * Level mapping (aperture value → visual result):
-   *   255 = fully open  (forehead highlight, nose bridge catch-light)
-   *   192 = mostly open (lighter cheek, lit skin)
-   *   110 = half open   (average skin tone)
-   *    50 = mostly closed (cheek shadow, beard, under-chin)
-   *     0 = fully closed (eye sockets, hair, nostrils)
+   * Uses 10th–90th percentile of a wider core ellipse (r=0.40) for the
+   * spread, so the anchor is always a true face tone not a stray pixel.
+   *
+   *   255 = fully open    — top 30% brighter than skin (highlights)
+   *    90 = barely open   — skin tone and slightly above (face shape visible but dark)
+   *     0 = fully closed  — shadows, hair, eyes, background
    */
   _faceContrast(grey) {
     const cx = (COLS - 1) / 2, cy = (ROWS - 1) / 2;
-    const coreRx = COLS * 0.25, coreRy = ROWS * 0.25;
+    // Wider core (0.40) captures more of the face for a stable skin-tone anchor
+    const coreRx = COLS * 0.40, coreRy = ROWS * 0.40;
     const core = [];
     for (let r = 0; r < ROWS; r++)
       for (let c = 0; c < COLS; c++) {
@@ -342,22 +342,19 @@ export class ImageProcessor {
     if (core.length < 8) return grey.map(() => 0);
     core.sort((a, b) => a - b);
 
-    // Median = skin tone. Spread = local contrast around that tone.
+    // Use full 10–90 percentile range so spread captures the real face gradient
     const median = core[Math.floor(core.length * 0.50)];
-    const spread = Math.max(
-      core[Math.floor(core.length * 0.85)] - median,
-      median - core[Math.floor(core.length * 0.15)],
-      12
-    );
+    const p10    = core[Math.floor(core.length * 0.10)];
+    const p90    = core[Math.floor(core.length * 0.90)];
+    const spread = Math.max((p90 - p10) / 2, 15);
 
-    // 5-level posterize relative to skin tone
+    // High-contrast 3-level: only the brightest 30% above skin pops open;
+    // skin itself is dark (90); shadows are closed (0).
     return grey.map(v => {
       const delta = (v - median) / spread;
-      if (delta >  0.50) return 255; // bright highlight → fully open
-      if (delta >  0.10) return 192; // lighter than skin → mostly open
-      if (delta > -0.25) return 110; // near skin tone → mid
-      if (delta > -0.65) return  50; // shadow → mostly closed
-      return 0;                       // deep shadow → fully closed
+      if (delta >  0.30) return 255; // highlight → fully open
+      if (delta > -0.50) return  90; // skin tone → barely open (face shape readable)
+      return 0;                       // shadow / hair / eyes → fully closed
     });
   }
 
