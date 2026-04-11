@@ -254,10 +254,10 @@ export class ImageProcessor {
     const vw = this._source.videoWidth  || 640;
     const vh = this._source.videoHeight || 480;
 
-    // Expand bbox with padding: 50% sides, 70% top (forehead), 40% bottom (chin)
-    const padX  = rawBbox.w * 0.5;
-    const padYt = rawBbox.h * 0.7;
-    const padYb = rawBbox.h * 0.4;
+    // Tight padding so face fills ~80% of grid: 20% sides, 30% top, 15% bottom
+    const padX  = rawBbox.w * 0.2;
+    const padYt = rawBbox.h * 0.3;
+    const padYb = rawBbox.h * 0.15;
     const sx = Math.max(0, rawBbox.x - padX);
     const sy = Math.max(0, rawBbox.y - padYt);
     const sw = Math.min(vw - sx, rawBbox.w + padX * 2);
@@ -273,7 +273,24 @@ export class ImageProcessor {
 
     const imgData = ctx.getImageData(0, 0, COLS, ROWS).data;
     const grey    = this._toGreyscale(imgData);
-    return this._faceContrast(grey);
+    const detail  = this._faceContrast(grey);
+
+    // Elliptical vignette: smoothly zero out background within the crop
+    // so the face reads as a portrait on pure black, matching the reference.
+    const cx = (COLS - 1) / 2, cy = (ROWS - 1) / 2;
+    const rx = COLS / 2,       ry = ROWS / 2;
+    const out = new Array(TOTAL);
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const idx = r * COLS + c;
+        const dx = (c - cx) / rx, dy = (r - cy) / ry;
+        const dist = Math.sqrt(dx * dx + dy * dy); // 0 = centre, 1 = edge
+        // Smooth cosine falloff: full value inside 0.75 radius, fades to 0 at 1.0
+        const mask = dist < 0.75 ? 1 : Math.max(0, Math.cos((dist - 0.75) / 0.25 * Math.PI * 0.5));
+        out[idx] = detail[idx] * mask;
+      }
+    }
+    return out;
   }
 
   /**
