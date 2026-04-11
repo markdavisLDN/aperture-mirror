@@ -34,6 +34,9 @@ export class ImageProcessor {
     this._bgSamples   = [];
     this._bgReady     = false;
     this._bgCapturing = false;
+
+    // Temporal smoothing for face crop — prevents flicker on still image
+    this._faceGreyAvg = null;
   }
 
   setSource(videoEl) {
@@ -272,8 +275,20 @@ export class ImageProcessor {
     ctx.restore();
 
     const imgData = ctx.getImageData(0, 0, COLS, ROWS).data;
-    const grey    = this._toGreyscale(imgData);
-    const detail  = this._faceContrast(grey);
+    const greyRaw = this._toGreyscale(imgData);
+
+    // Temporal smoothing: blend each new frame into a running average.
+    // ALPHA=0.15 → ~6-7 frames to converge, ~1s at 6fps.
+    // Eliminates flicker on still face; still tracks real movement.
+    const ALPHA = 0.15;
+    if (!this._faceGreyAvg || this._faceGreyAvg.length !== TOTAL) {
+      this._faceGreyAvg = greyRaw.slice();
+    } else {
+      for (let i = 0; i < TOTAL; i++)
+        this._faceGreyAvg[i] = this._faceGreyAvg[i] * (1 - ALPHA) + greyRaw[i] * ALPHA;
+    }
+    const grey   = this._faceGreyAvg;
+    const detail = this._faceContrast(grey);
 
     // Outside face ellipse → BG_OPEN (slightly open, like the grey circles
     // in the reference image — background is NOT fully closed).
